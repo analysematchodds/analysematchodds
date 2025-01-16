@@ -141,18 +141,103 @@ def main():
     if not selected_criteria:
         st.warning("En az bir benzerlik kriteri seçmelisiniz!")
         return
-        
-    # Arama kutusu
-    search_term = st.text_input("Takım adı ile ara:", "")
+    
+    # Lig Seçimi
+    st.header("Lig Seçimi")
+    leagues = {
+        "Süper Lig": "https://raw.githubusercontent.com/analysematchodds/match_odds_csv/refs/heads/main/matchodds.csv",
+        "Premier League": "https://raw.githubusercontent.com/analysematchodds/match_odds_csv/refs/heads/main/premierleague.csv",
+        "La Liga": "https://raw.githubusercontent.com/analysematchodds/match_odds_csv/refs/heads/main/laliga.csv",
+        "Serie A": "https://raw.githubusercontent.com/analysematchodds/match_odds_csv/refs/heads/main/seriea.csv",
+        "Bundesliga": "https://raw.githubusercontent.com/analysematchodds/match_odds_csv/refs/heads/main/bundesliga.csv",
+        "Ligue 1": "https://raw.githubusercontent.com/analysematchodds/match_odds_csv/refs/heads/main/ligue1.csv"
+    }
+
+    selected_league = st.selectbox("Lig Seçin", options=list(leagues.keys()))
+    csv_path = leagues[selected_league]
     
     # CSV dosyasını seçilen kriterlere göre oku
-    df = load_and_prepare_data('https://raw.githubusercontent.com/analysematchodds/match_odds_csv/refs/heads/main/matchodds.csv', selected_criteria)
+    df = load_and_prepare_data(csv_path, selected_criteria)
     
     df['Tarih'] = pd.to_datetime(df['Tarih']).dt.strftime('%d.%m.%Y')
     df['Saat'] = pd.to_datetime(df['Saat'], format='%H:%M:%S').dt.strftime('%H:%M')
 
     # Benzerlik matrisini hesapla
     similarity_matrix = calculate_similarity(df, selected_criteria)
+    
+    st.write("---")  # Ayırıcı çizgi
+    
+    # En son haftayı bul ve o haftanın maçlarını filtrele
+    latest_week = df['Hafta'].max()
+    latest_week_matches = df[df['Hafta'] == latest_week]
+
+    if not latest_week_matches.empty:
+        st.write("Bu haftanın maçları:")
+
+        # Tıklanabilir maç listesi oluştur
+        week_matches = []
+        for idx, row in latest_week_matches.iterrows():
+            match_str = f"{row['Ev Sahibi']} vs {row['Deplasman']} ({row['Tarih']} - {row['Saat']})"
+            week_matches.append((df.index.get_loc(idx), match_str))
+
+        selected_week_match = st.selectbox(
+            "Haftanın maçlarından birini seçin:",
+            options=week_matches,
+            format_func=lambda x: x[1]
+        )
+
+        if st.button("Seçilen Maçın Benzerlerini Bul"):
+            selected_idx = selected_week_match[0]
+            similarity_matrix = calculate_similarity(df, selected_criteria)
+            result_df = find_similar_matches(df, similarity_matrix, selected_idx)
+            
+            # Format sözlüğünü tüm sayısal sütunlar için oluştur
+            format_dict = {
+                'MS1': '{:.2f}', 'MS0': '{:.2f}', 'MS2': '{:.2f}',
+                'AU2.5 Alt': '{:.2f}', 'AU2.5 Üst': '{:.2f}',
+                'KG Var': '{:.2f}', 'KG Yok': '{:.2f}',
+                'IY0.5 Alt': '{:.2f}', 'IY0.5 Üst': '{:.2f}',
+                'AU1.5 Alt': '{:.2f}', 'AU1.5 Üst': '{:.2f}',
+                'IY1': '{:.2f}', 'IY0': '{:.2f}', 'IY2': '{:.2f}',
+                '2Y1': '{:.2f}', '2Y0': '{:.2f}', '2Y2': '{:.2f}',
+                'Tek': '{:.2f}', 'Çift': '{:.2f}',
+                'IY Çifte Şans 1-X': '{:.2f}', 'IY Çifte Şans 1-2': '{:.2f}', 'IY Çifte Şans X-2': '{:.2f}',
+                'IY/MS 1/1': '{:.2f}', 'IY/MS 1/0': '{:.2f}', 'IY/MS 1/2': '{:.2f}',
+                'IY/MS 0/1': '{:.2f}', 'IY/MS 0/0': '{:.2f}', 'IY/MS 0/2': '{:.2f}',
+                'IY/MS 2/1': '{:.2f}', 'IY/MS 2/0': '{:.2f}', 'IY/MS 2/2': '{:.2f}',
+                'Çifte Şans 1-X': '{:.2f}', 'Çifte Şans 1-2': '{:.2f}', 'Çifte Şans X-2': '{:.2f}',
+                'Similarity': '{:.2%}'
+            }
+
+            # Benzer maçları göster
+            st.write("### Seçilen Maç")
+            st.dataframe(
+                result_df.iloc[[0]].style.format(format_dict)
+            )
+
+            st.write("### En Benzer 5 Maç")
+            st.dataframe(
+                result_df.iloc[1:6].style.format(format_dict)
+            )
+            
+            # Sadece seçili kriterleri içeren benzer maçları göster
+            st.write("### En Benzer 5 Maç (Seçili Kriterler)")
+            
+            # Temel bilgi sütunları + seçili kriterler + benzerlik skoru
+            selected_columns = ['Similarity'] + ['Tarih', 'Saat', 'Lig', 'MBS', 'Ev Sahibi', 'Skor', 'Deplasman', 'İY'] + selected_criteria
+            
+            # Format sözlüğünü seçili kriterler için güncelle
+            selected_format_dict = {col: '{:.2f}' for col in selected_criteria}
+            selected_format_dict['Similarity'] = '{:.2%}'
+            
+            st.dataframe(
+                result_df.iloc[1:][selected_columns].style.format(selected_format_dict)
+            )
+            
+    st.write("---")  # Ayırıcı çizgi
+    
+    # Arama kutusu
+    search_term = st.text_input("Takım adı ile ara:", "")
     
     if search_term:
         # Takım adına göre filtrele
@@ -218,7 +303,7 @@ def main():
                 st.write("### En Benzer 5 Maç (Seçili Kriterler)")
                 
                 # Temel bilgi sütunları + seçili kriterler + benzerlik skoru
-                selected_columns = ['Tarih', 'Saat', 'Lig', 'MBS', 'Ev Sahibi', 'Skor', 'Deplasman', 'İY'] + selected_criteria + ['Similarity']
+                selected_columns = ['Similarity'] + ['Tarih', 'Saat', 'Lig', 'MBS', 'Ev Sahibi', 'Skor', 'Deplasman', 'İY'] + selected_criteria
                 
                 # Format sözlüğünü seçili kriterler için güncelle
                 selected_format_dict = {col: '{:.2f}' for col in selected_criteria}
