@@ -316,7 +316,12 @@ def main():
                             st.write("##### Gol İstatistikleri")
                             st.write(f"- En çok gol: {max(goller) if goller else '-'}")
                             st.write(f"- En az gol: {min(goller) if goller else '-'}")
-                            st.write(f"- 2.5 Üstü Maç Oranı: {len([g for g in goller if g > 2])/len(goller)*100:.1f}%" if goller else "-")
+                            
+                            # 2.5 Üstü analizi
+                            ustu_mac = len([g for g in goller if g > 2])
+                            toplam_mac = len(goller)
+                            ustu_oran = (ustu_mac / toplam_mac * 100) if toplam_mac > 0 else 0
+                            st.write(f"- 2.5 Üstü Maç Oranı: {ustu_oran:.1f}% ({ustu_mac}/{toplam_mac})")
                             
                             # İlk Yarı 1.5 Üstü analizi
                             iy_15_ustu = 0
