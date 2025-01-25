@@ -39,11 +39,42 @@ def load_and_prepare_data(csv_path, selected_columns):
 
 @st.cache_data
 def calculate_similarity(df, numeric_columns):
+    """
+    Maçlar arasındaki benzerlik matrisini hesaplar.
+    
+    Parametreler:
+    - df: Maç verileri DataFrame'i
+    - numeric_columns: Benzerlik hesaplanacak sayısal sütunlar
+    """
     scaler = MinMaxScaler()
     normalized_data = scaler.fit_transform(df[numeric_columns])
     
     n_matches = len(df)
     similarity_matrix = np.zeros((n_matches, n_matches))
+    
+    # Sütunlara göre ağırlıklar tanımla
+    weights = {}
+    for col in numeric_columns:
+        if 'MS' in col:  # Maç Sonucu
+            weights[numeric_columns.index(col)] = 2.0
+        elif 'KG' in col:  # Karşılıklı Gol
+            weights[numeric_columns.index(col)] = 1.8
+        elif 'IY/MS' in col:  # İlk Yarı/Maç Sonucu
+            weights[numeric_columns.index(col)] = 1.7
+        elif 'IY' in col and not 'IY/MS' in col:  # İlk Yarı (IY/MS hariç)
+            weights[numeric_columns.index(col)] = 1.6
+        elif '2Y' in col:  # İkinci Yarı
+            weights[numeric_columns.index(col)] = 1.5
+        elif 'AU2.5' in col:  # Alt/Üst 2.5
+            weights[numeric_columns.index(col)] = 1.4
+        elif 'AU1.5' in col:  # Alt/Üst 1.5
+            weights[numeric_columns.index(col)] = 1.3
+        elif 'Tek' in col or 'Çift' in col:  # Tek/Çift
+            weights[numeric_columns.index(col)] = 1.2
+        else:
+            weights[numeric_columns.index(col)] = 1.0
+    
+    weight_array = np.array([weights.get(i, 1.0) for i in range(len(numeric_columns))])
     
     # Her maç çifti için benzerlik hesapla
     for i in range(n_matches):
@@ -52,16 +83,20 @@ def calculate_similarity(df, numeric_columns):
                 # Seçilen sütunlardaki oranların farkını hesapla
                 diff = np.abs(normalized_data[i] - normalized_data[j])
                 
+                # Ağırlıklı fark hesapla
+                weighted_diff = diff * weight_array
+                
                 # Her bir oran için maksimum kabul edilebilir fark
-                max_acceptable_diff = 0.15  # %15'lik fark
+                max_acceptable_diff = 0.2  # %20'lik farka yükseltildi
                 
                 # Farkın kabul edilebilir sınırlar içinde olup olmadığını kontrol et
-                within_threshold = diff <= max_acceptable_diff
+                within_threshold = weighted_diff <= max_acceptable_diff
                 
-                # Tüm oranlar için benzerlik şartı sağlanıyorsa
-                if np.all(within_threshold):
+                # En az %70 oranında benzerlik varsa kabul et
+                min_similar_features = int(len(numeric_columns) * 0.7)
+                if np.sum(within_threshold) >= min_similar_features:
                     # Benzerlik skorunu hesapla
-                    similarity = 1 - (np.mean(diff) / max_acceptable_diff)
+                    similarity = 1 - (np.mean(weighted_diff) / max_acceptable_diff)
                     similarity_matrix[i,j] = similarity
                 else:
                     similarity_matrix[i,j] = 0
@@ -71,23 +106,49 @@ def calculate_similarity(df, numeric_columns):
 def find_similar_matches(df, similarity_matrix, selected_idx, n_matches=5):
     """
     Seçilen maça en benzer n maçı bulur.
+    
+    Parametreler:
+    - df: Maç verileri DataFrame'i
+    - similarity_matrix: Benzerlik matrisi
+    - selected_idx: Seçilen maçın indeksi
+    - n_matches: Bulunacak benzer maç sayısı
     """
     similarities = similarity_matrix[selected_idx]
     
-    # Minimum benzerlik eşiği
-    similarity_threshold = 0.7  # %70 ve üzeri benzerlik
+    # Başlangıç benzerlik eşiği
+    initial_threshold = 0.5
+    min_threshold = 0.3
     
-    # Eşik değerini geçen maçları filtrele
-    similar_indices = np.where(similarities >= similarity_threshold)[0]
+    similarity_threshold = initial_threshold
+    similar_indices = []
     
-    # Benzerlik skoruna göre sırala
-    similar_indices = similar_indices[np.argsort(similarities[similar_indices])[::-1]]
+    # Tarih bazlı filtreleme için
+    selected_date = pd.to_datetime(df.iloc[selected_idx]['Tarih'], format='%d.%m.%Y')
     
-    # İlk n maçı al (kendisi hariç)
-    similar_indices = similar_indices[similar_indices != selected_idx][:n_matches]
+    # Yeterli benzer maç bulana kadar eşiği düşür
+    while len(similar_indices) < n_matches and similarity_threshold >= min_threshold:
+        # Eşik değerini geçen maçları filtrele
+        candidate_indices = np.where(similarities >= similarity_threshold)[0]
+        
+        # Tarih kontrolü yap (seçilen maçtan önceki maçları al)
+        filtered_indices = []
+        for idx in candidate_indices:
+            if idx != selected_idx:
+                match_date = pd.to_datetime(df.iloc[idx]['Tarih'], format='%d.%m.%Y')
+                if match_date < selected_date:
+                    filtered_indices.append(idx)
+        
+        # Benzerlik skoruna göre sırala
+        similar_indices = sorted(filtered_indices, 
+                               key=lambda x: similarities[x], 
+                               reverse=True)[:n_matches]
+        
+        # Yeterli maç bulunamadıysa eşiği düşür
+        if len(similar_indices) < n_matches:
+            similarity_threshold -= 0.1
     
     if len(similar_indices) == 0:
-        st.warning("Yeterince benzer maç bulunamadı!")
+        st.warning("Yeterince benzer maç bulunamadı! Lütfen farklı benzerlik kriterleri seçin.")
         return None
     
     # Seçilen maç ve benzer maçları DataFrame'e ekle
