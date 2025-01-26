@@ -253,6 +253,9 @@ def main():
             format_func=lambda x: x[1]
         )
 
+        # Seçilen maç metnini kopyalanabilir şekilde göster
+        st.code(selected_week_match[1], language=None)
+
         if st.button("Seçilen Maçın Benzerlerini Bul"):
             selected_idx = selected_week_match[0]
             similarity_matrix = calculate_similarity(df, selected_criteria)
