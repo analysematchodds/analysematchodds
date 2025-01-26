@@ -164,7 +164,7 @@ def main():
             "Minimum Benzerlik Oranı",
             min_value=0.30,
             max_value=0.90,
-            value=0.50,
+            value=0.30,
             step=0.05,
             help="Seçilen maça benzerlik oranı bu değerin altında olan maçlar gösterilmeyecek"
         )
@@ -289,7 +289,8 @@ def main():
                 st.write("### Seçilen Maç")
                 selected_columns = base_columns + selected_criteria
                 st.dataframe(
-                    result_df.iloc[[0]][selected_columns].style.format(format_dict)
+                    result_df.iloc[[0]][selected_columns].style
+                    .format(format_dict)
                 )
 
                 # Benzer maçları göster
@@ -301,7 +302,39 @@ def main():
                 selected_format_dict['Similarity'] = '{:.2%}'
                 
                 st.dataframe(
-                    result_df.iloc[1:][display_columns].style.format(selected_format_dict)
+                    result_df.iloc[1:][display_columns].style
+                    .format(selected_format_dict)
+                )
+
+                # Tüm oranları içeren yeni tablo
+                st.write("### Tüm Oranlar")
+                
+                # Tüm oran sütunlarını içeren liste
+                all_odds_columns = [
+                    'MS1', 'MS0', 'MS2', 'AU2.5 Alt', 'AU2.5 Üst',
+                    'KG Var', 'KG Yok', 'IY0.5 Alt', 'IY0.5 Üst',
+                    'AU1.5 Alt', 'AU1.5 Üst', 'IY1', 'IY0', 'IY2',
+                    '2Y1', '2Y0', '2Y2', 'Tek', 'Çift',
+                    'IY/MS 1/1', 'IY/MS 1/0', 'IY/MS 1/2',
+                    'IY/MS 0/1', 'IY/MS 0/0', 'IY/MS 0/2',
+                    'IY/MS 2/1', 'IY/MS 2/0', 'IY/MS 2/2'
+                ]
+                
+                # Temel bilgi sütunları + tüm oranlar
+                full_display_columns = ['Similarity'] + base_columns + all_odds_columns
+                
+                # Format sözlüğünü tüm oranlar için güncelle
+                full_format_dict = {col: '{:.2f}' for col in all_odds_columns}
+                full_format_dict['Similarity'] = '{:.2%}'
+                
+                # İlk satır için stil fonksiyonu
+                def highlight_first_row(x):
+                    return ['background-color: #272727' if i == 0 else '' for i in range(len(x))]
+                
+                st.dataframe(
+                    result_df[full_display_columns].style
+                    .format(full_format_dict)
+                    .apply(highlight_first_row, axis=0)
                 )
 
                 # Analiz Bölümü
