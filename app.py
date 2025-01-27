@@ -214,7 +214,10 @@ def main():
         "La Liga": "https://raw.githubusercontent.com/analysematchodds/match_odds_csv/refs/heads/main/laliga.csv",
         "Serie A": "https://raw.githubusercontent.com/analysematchodds/match_odds_csv/refs/heads/main/seriea.csv",
         "Bundesliga": "https://raw.githubusercontent.com/analysematchodds/match_odds_csv/refs/heads/main/bundesliga.csv",
-        "Ligue 1": "https://raw.githubusercontent.com/analysematchodds/match_odds_csv/refs/heads/main/ligue1.csv"
+        "Ligue 1": "https://raw.githubusercontent.com/analysematchodds/match_odds_csv/refs/heads/main/ligue1.csv",
+        "Şampiyonlar Ligi": "https://raw.githubusercontent.com/analysematchodds/match_odds_csv/refs/heads/main/championsleague.csv",
+        "Avrupa Ligi": "https://raw.githubusercontent.com/analysematchodds/match_odds_csv/refs/heads/main/europeleague.csv",
+        "Konferans Ligi": "https://raw.githubusercontent.com/analysematchodds/match_odds_csv/refs/heads/main/conferenceleague.csv"
     }
 
     selected_league = st.selectbox("Lig Seçin", options=list(leagues.keys()))
