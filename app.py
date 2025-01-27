@@ -366,7 +366,7 @@ def main():
                     
                     sonuc_dagilimi = pd.Series(sonuclar).value_counts()
                     
-                    # Metrik kartları
+                    # Metrik kartları - İlk row
                     col1, col2, col3 = st.columns(3)
                     
                     with col1:
@@ -432,6 +432,89 @@ def main():
                             toplam = sum(iy_gol_dagilimi.values())
                             yuzde = (mac_sayisi / toplam * 100) if toplam > 0 else 0
                             st.write(f"**{gol_sayisi}:** {mac_sayisi} maç ({yuzde:.0f}%)")
+
+                    # Taraf analizi için yeni row
+                    st.write("")  # Boşluk ekle
+                    col4, col5, col6 = st.columns(3)
+                    
+                    with col4:
+                        # Maç sonucu analizi
+                        mac_sonuclari = []
+                        for _, row in result_df.iloc[1:].iterrows():
+                            if row['Skor'] != '-':
+                                ev_gol, dep_gol = map(int, row['Skor'].split('-'))
+                                if ev_gol > dep_gol:
+                                    mac_sonuclari.append("Ev Sahibi")
+                                elif ev_gol < dep_gol:
+                                    mac_sonuclari.append("Deplasman")
+                                else:
+                                    mac_sonuclari.append("Beraberlik")
+                        
+                        sonuc_dagilimi = pd.Series(mac_sonuclari).value_counts()
+                        en_yaygin_sonuc = sonuc_dagilimi.index[0] if not sonuc_dagilimi.empty else "-"
+                        sonuc_oran = (sonuc_dagilimi.iloc[0] / len(mac_sonuclari) * 100) if not sonuc_dagilimi.empty else 0
+                        
+                        st.metric(
+                            "En Yaygın Maç Sonucu",
+                            en_yaygin_sonuc,
+                            f"%{sonuc_oran:.0f}",
+                            help="Benzer maçlarda en sık görülen maç sonucu ve yüzdesi"
+                        )
+                    
+                    with col5:
+                        # İlk yarı sonucu analizi
+                        iy_sonuclari = []
+                        for _, row in result_df.iloc[1:].iterrows():
+                            if row['İY'] != '-':
+                                iy_ev, iy_dep = map(int, row['İY'].split('-'))
+                                if iy_ev > iy_dep:
+                                    iy_sonuclari.append("Ev Sahibi")
+                                elif iy_ev < iy_dep:
+                                    iy_sonuclari.append("Deplasman")
+                                else:
+                                    iy_sonuclari.append("Beraberlik")
+                        
+                        iy_dagilimi = pd.Series(iy_sonuclari).value_counts()
+                        en_yaygin_iy_sonuc = iy_dagilimi.index[0] if not iy_dagilimi.empty else "-"
+                        iy_sonuc_oran = (iy_dagilimi.iloc[0] / len(iy_sonuclari) * 100) if not iy_dagilimi.empty else 0
+                        
+                        st.metric(
+                            "En Yaygın İY Sonucu",
+                            en_yaygin_iy_sonuc,
+                            f"%{iy_sonuc_oran:.0f}",
+                            help="Benzer maçlarda en sık görülen ilk yarı sonucu ve yüzdesi"
+                        )
+                    
+                    with col6:
+                        # İkinci yarı sonucu analizi
+                        iy2_sonuclari = []
+                        for _, row in result_df.iloc[1:].iterrows():
+                            if row['İY'] != '-' and row['Skor'] != '-':
+                                # İlk yarı skorları
+                                iy_ev, iy_dep = map(int, row['İY'].split('-'))
+                                # Maç sonu skorları
+                                ms_ev, ms_dep = map(int, row['Skor'].split('-'))
+                                # İkinci yarı skorları
+                                iy2_ev = ms_ev - iy_ev
+                                iy2_dep = ms_dep - iy_dep
+                                
+                                if iy2_ev > iy2_dep:
+                                    iy2_sonuclari.append("Ev Sahibi")
+                                elif iy2_ev < iy2_dep:
+                                    iy2_sonuclari.append("Deplasman")
+                                else:
+                                    iy2_sonuclari.append("Beraberlik")
+                        
+                        iy2_dagilimi = pd.Series(iy2_sonuclari).value_counts()
+                        en_yaygin_iy2_sonuc = iy2_dagilimi.index[0] if not iy2_dagilimi.empty else "-"
+                        iy2_sonuc_oran = (iy2_dagilimi.iloc[0] / len(iy2_sonuclari) * 100) if not iy2_dagilimi.empty else 0
+                        
+                        st.metric(
+                            "En Yaygın 2Y Sonucu",
+                            en_yaygin_iy2_sonuc,
+                            f"%{iy2_sonuc_oran:.0f}",
+                            help="Benzer maçlarda en sık görülen ikinci yarı sonucu ve yüzdesi"
+                        )
 
                     # Grafikler için sekmeler
                     tab1, tab2, tab3 = st.tabs(["Detaylı İstatistikler", "Gol Analizi", "İY/MS Analizi"])
