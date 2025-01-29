@@ -10,6 +10,10 @@ def load_and_prepare_data(csv_path, selected_columns):
         # CSV'yi oku
         df = pd.read_csv(csv_path)
         
+        # Tarih ve saat formatlarını düzelt
+        df['Tarih'] = pd.to_datetime(df['Tarih'], format='%Y-%m-%d').dt.strftime('%d.%m.%Y')
+        df['Saat'] = pd.to_datetime(df['Saat'], format='%H:%M:%S').dt.strftime('%H:%M')
+        
         # Tüm sayısal sütunları belirle
         numeric_columns = [
             'MS1', 'MS0', 'MS2', 'AU2.5 Alt', 'AU2.5 Üst', 
@@ -116,13 +120,15 @@ def find_similar_matches(df, similarity_matrix, selected_idx, n_matches=5,
     - min_similarity: Minimum benzerlik oranı
     """
     similarities = similarity_matrix[selected_idx]
-    selected_date = pd.to_datetime(df.iloc[selected_idx]['Tarih'], format='%d.%m.%Y')
+    
+    # Tarih formatını düzelt
+    selected_date = pd.to_datetime(df.iloc[selected_idx]['Tarih'], format='%d.%m.%Y', dayfirst=True)
     
     # Tarih kontrolü yap (seçilen maçtan önceki maçları al)
     filtered_indices = []
     for idx, similarity in enumerate(similarities):
         if idx != selected_idx and similarity >= min_similarity:
-            match_date = pd.to_datetime(df.iloc[idx]['Tarih'], format='%d.%m.%Y')
+            match_date = pd.to_datetime(df.iloc[idx]['Tarih'], format='%d.%m.%Y', dayfirst=True)
             
             # Filtreleme kriteri
             date_ok = match_date < selected_date
@@ -150,60 +156,14 @@ def find_similar_matches(df, similarity_matrix, selected_idx, n_matches=5,
     result_df = pd.concat(matches, axis=1).T.reset_index(drop=True)
     result_df['Similarity'] = similarities_list
     
+    # Tarih ve saat formatlarını düzelt
+    result_df['Tarih'] = pd.to_datetime(result_df['Tarih'], format='%d.%m.%Y', dayfirst=True).dt.strftime('%d.%m.%Y')
+    result_df['Saat'] = pd.to_datetime(result_df['Saat'], format='%H:%M').dt.strftime('%H:%M')
+    
     return result_df
 
 def main():
     st.title("Benzer Maç Bulucu")
-    
-    # Sidebar için filtreleme seçenekleri
-    with st.sidebar:
-        st.write("### 🔍 Filtreleme Seçenekleri")
-        
-        # Benzerlik oranı filtresi
-        min_similarity = st.slider(
-            "Minimum Benzerlik Oranı",
-            min_value=0.30,
-            max_value=0.90,
-            value=0.30,
-            step=0.05,
-            help="Seçilen maça benzerlik oranı bu değerin altında olan maçlar gösterilmeyecek"
-        )
-        
-        st.write("---")
-    
-    # Ana içerik
-    # Sol panel için container
-    with st.container():
-        st.write("### Benzerlik Kriterleri")
-        
-        # Her bir kriter için checkbox'ları 2 sütunda göster
-        similarity_options = {
-            'Maç Sonucu': ['MS1', 'MS0', 'MS2'],
-            'Alt/Üst 2.5': ['AU2.5 Alt', 'AU2.5 Üst'],
-            'Karşılıklı Gol': ['KG Var', 'KG Yok'],
-            'İlk Yarı Alt/Üst 0.5': ['IY0.5 Alt', 'IY0.5 Üst'],
-            'Alt/Üst 1.5': ['AU1.5 Alt', 'AU1.5 Üst'],
-            'İlk Yarı Sonucu': ['IY1', 'IY0', 'IY2'],
-            'İkinci Yarı Sonucu': ['2Y1', '2Y0', '2Y2'],
-            'Tek/Çift': ['Tek', 'Çift'],
-            'İlk Yarı/Maç Sonucu': [
-                'IY/MS 1/1', 'IY/MS 1/0', 'IY/MS 1/2',
-                'IY/MS 0/1', 'IY/MS 0/0', 'IY/MS 0/2',
-                'IY/MS 2/1', 'IY/MS 2/0', 'IY/MS 2/2'
-            ]
-        }
-        
-        selected_criteria = []
-        cols = st.columns(2)  # 2 sütunlu layout
-        for i, (name, columns) in enumerate(similarity_options.items()):
-            if cols[i % 2].checkbox(name, value=(name == 'Maç Sonucu')):
-                selected_criteria.extend(columns)
-    
-    st.write("---")  # Ayırıcı çizgi
-    
-    if not selected_criteria:
-        st.warning("En az bir benzerlik kriteri seçmelisiniz!")
-        return
     
     # Lig Seçimi
     st.header("Lig Seçimi")
@@ -223,479 +183,593 @@ def main():
     selected_league = st.selectbox("Lig Seçin", options=list(leagues.keys()))
     csv_path = leagues[selected_league]
     
-    # CSV dosyasını seçilen kriterlere göre oku
-    df = load_and_prepare_data(csv_path, selected_criteria)
+    # CSV dosyasını oku
+    df = pd.read_csv(csv_path)
     
-    if df is None:
-        return
-    
-    df['Tarih'] = pd.to_datetime(df['Tarih']).dt.strftime('%d.%m.%Y')
-    df['Saat'] = pd.to_datetime(df['Saat'], format='%H:%M:%S').dt.strftime('%H:%M')
+    if df is not None:
+        # Tarih ve saat formatlarını düzelt
+        df['Tarih'] = pd.to_datetime(df['Tarih'], format='%Y-%m-%d').dt.strftime('%d.%m.%Y')
+        df['Saat'] = pd.to_datetime(df['Saat'], format='%H:%M:%S').dt.strftime('%H:%M')
+        
+        # En son haftayı bul ve o haftanın maçlarını filtrele
+        latest_week = df['Hafta'].max()
+        latest_week_matches = df[df['Hafta'] == latest_week]
 
-    # Benzerlik matrisini hesapla
-    similarity_matrix = calculate_similarity(df, selected_criteria)
-    
-    st.write("---")  # Ayırıcı çizgi
-    
-    # En son haftayı bul ve o haftanın maçlarını filtrele
-    latest_week = df['Hafta'].max()
-    latest_week_matches = df[df['Hafta'] == latest_week]
+        if not latest_week_matches.empty:
+            st.write("Bu haftanın maçları:")
 
-    if not latest_week_matches.empty:
-        st.write("Bu haftanın maçları:")
+            # Tıklanabilir maç listesi oluştur
+            week_matches = []
+            for idx, row in latest_week_matches.iterrows():
+                match_str = f"{row['Ev Sahibi']} vs {row['Deplasman']} ({row['Tarih']} - {row['Saat']})"
+                week_matches.append((df.index.get_loc(idx), match_str))
 
-        # Tıklanabilir maç listesi oluştur
-        week_matches = []
-        for idx, row in latest_week_matches.iterrows():
-            match_str = f"{row['Ev Sahibi']} vs {row['Deplasman']} ({row['Tarih']} - {row['Saat']})"
-            week_matches.append((df.index.get_loc(idx), match_str))
+            selected_week_match = st.selectbox(
+                "Haftanın maçlarından birini seçin:",
+                options=week_matches,
+                format_func=lambda x: x[1]
+            )
 
-        selected_week_match = st.selectbox(
-            "Haftanın maçlarından birini seçin:",
-            options=week_matches,
-            format_func=lambda x: x[1]
-        )
+            # Seçilen maç metnini kopyalanabilir şekilde göster
+            st.code(selected_week_match[1], language=None)
 
-        # Seçilen maç metnini kopyalanabilir şekilde göster
-        st.code(selected_week_match[1], language=None)
-
-        if st.button("Seçilen Maçın Benzerlerini Bul"):
-            selected_idx = selected_week_match[0]
-            similarity_matrix = calculate_similarity(df, selected_criteria)
+            # Filtreleme seçenekleri
+            st.write("### 🔍 Filtreleme Seçenekleri")
             
-            # Filtreleme parametrelerini find_similar_matches fonksiyonuna gönder
-            result_df = find_similar_matches(
-                df, 
-                similarity_matrix, 
-                selected_idx,
-                min_similarity=min_similarity
+            # Benzerlik oranı filtresi
+            min_similarity = st.slider(
+                "Minimum Benzerlik Oranı",
+                min_value=0.30,
+                max_value=0.90,
+                value=0.30,
+                step=0.05,
+                help="Seçilen maça benzerlik oranı bu değerin altında olan maçlar gösterilmeyecek"
             )
             
-            if result_df is not None:
-                # Format sözlüğünü oluştur
-                format_dict = {
-                    'MS1': '{:.2f}', 'MS0': '{:.2f}', 'MS2': '{:.2f}',
-                    'AU2.5 Alt': '{:.2f}', 'AU2.5 Üst': '{:.2f}',
-                    'KG Var': '{:.2f}', 'KG Yok': '{:.2f}',
-                    'IY0.5 Alt': '{:.2f}', 'IY0.5 Üst': '{:.2f}',
-                    'AU1.5 Alt': '{:.2f}', 'AU1.5 Üst': '{:.2f}',
-                    'IY1': '{:.2f}', 'IY0': '{:.2f}', 'IY2': '{:.2f}',
-                    '2Y1': '{:.2f}', '2Y0': '{:.2f}', '2Y2': '{:.2f}',
-                    'Tek': '{:.2f}', 'Çift': '{:.2f}',
-                    'IY/MS 1/1': '{:.2f}', 'IY/MS 1/0': '{:.2f}', 'IY/MS 1/2': '{:.2f}',
-                    'IY/MS 0/1': '{:.2f}', 'IY/MS 0/0': '{:.2f}', 'IY/MS 0/2': '{:.2f}',
-                    'IY/MS 2/1': '{:.2f}', 'IY/MS 2/0': '{:.2f}', 'IY/MS 2/2': '{:.2f}',
-                    'Similarity': '{:.2%}'
-                }
-
-                # Temel bilgi sütunları + seçili kriterler
-                base_columns = ['Tarih', 'Saat', 'Lig', 'MBS', 'Ev Sahibi', 'Skor', 'Deplasman', 'İY']
-                
-                # Seçilen maçı göster
-                st.write("### Seçilen Maç")
-                selected_columns = base_columns + selected_criteria
-                st.dataframe(
-                    result_df.iloc[[0]][selected_columns].style
-                    .format(format_dict)
-                )
-
-                # Benzer maçları göster
-                st.write("### En Benzer 5 Maç")
-                display_columns = ['Similarity'] + base_columns + selected_criteria
-                
-                # Format sözlüğünü seçili kriterler için güncelle
-                selected_format_dict = {col: '{:.2f}' for col in selected_criteria}
-                selected_format_dict['Similarity'] = '{:.2%}'
-                
-                st.dataframe(
-                    result_df.iloc[1:][display_columns].style
-                    .format(selected_format_dict)
-                )
-
-                # Tüm oranları içeren yeni tablo
-                st.write("### Tüm Oranlar")
-                
-                # Tüm oran sütunlarını içeren liste
-                all_odds_columns = [
-                    'MS1', 'MS0', 'MS2', 'AU2.5 Alt', 'AU2.5 Üst',
-                    'KG Var', 'KG Yok', 'IY0.5 Alt', 'IY0.5 Üst',
-                    'AU1.5 Alt', 'AU1.5 Üst', 'IY1', 'IY0', 'IY2',
-                    '2Y1', '2Y0', '2Y2', 'Tek', 'Çift',
+            st.write("### Benzerlik Kriterleri")
+            
+            # Her bir kriter için checkbox'ları 2 sütunda göster
+            similarity_options = {
+                'Maç Sonucu': ['MS1', 'MS0', 'MS2'],
+                'Alt/Üst 2.5': ['AU2.5 Alt', 'AU2.5 Üst'],
+                'Karşılıklı Gol': ['KG Var', 'KG Yok'],
+                'İlk Yarı Alt/Üst 0.5': ['IY0.5 Alt', 'IY0.5 Üst'],
+                'Alt/Üst 1.5': ['AU1.5 Alt', 'AU1.5 Üst'],
+                'İlk Yarı Sonucu': ['IY1', 'IY0', 'IY2'],
+                'İkinci Yarı Sonucu': ['2Y1', '2Y0', '2Y2'],
+                'Tek/Çift': ['Tek', 'Çift'],
+                'İlk Yarı/Maç Sonucu': [
                     'IY/MS 1/1', 'IY/MS 1/0', 'IY/MS 1/2',
                     'IY/MS 0/1', 'IY/MS 0/0', 'IY/MS 0/2',
                     'IY/MS 2/1', 'IY/MS 2/0', 'IY/MS 2/2'
                 ]
-                
-                # Temel bilgi sütunları + tüm oranlar
-                full_display_columns = ['Similarity'] + base_columns + all_odds_columns
-                
-                # Format sözlüğünü tüm oranlar için güncelle
-                full_format_dict = {col: '{:.2f}' for col in all_odds_columns}
-                full_format_dict['Similarity'] = '{:.2%}'
-                
-                # İlk satır için stil fonksiyonu
-                def highlight_first_row(x):
-                    return ['background-color: #272727' if i == 0 else '' for i in range(len(x))]
-                
-                st.dataframe(
-                    result_df[full_display_columns].style
-                    .format(full_format_dict)
-                    .apply(highlight_first_row, axis=0)
-                )
+            }
+            
+            selected_criteria = []
+            cols = st.columns(2)  # 2 sütunlu layout
+            for i, (name, columns) in enumerate(similarity_options.items()):
+                if cols[i % 2].checkbox(name, value=(name == 'Maç Sonucu')):
+                    selected_criteria.extend(columns)
 
-                # Analiz Bölümü
-                with st.container():
-                    st.write("### Benzer Maçların Analizi")
+            if not selected_criteria:
+                st.warning("En az bir benzerlik kriteri seçmelisiniz!")
+                return
+
+            if st.button("Seçilen Maçın Benzerlerini Bul"):
+                # CSV dosyasını seçilen kriterlere göre oku
+                df = load_and_prepare_data(csv_path, selected_criteria)
+                
+                if df is not None:
+                    selected_idx = selected_week_match[0]
+                    similarity_matrix = calculate_similarity(df, selected_criteria)
                     
-                    # Goller listesini başta hazırla
-                    goller = []
-                    sonuclar = []
-                    for _, row in result_df.iloc[1:].iterrows():
-                        if row['Skor'] != '-':
-                            ev_gol, dep_gol = map(int, row['Skor'].split('-'))
-                            toplam_gol = ev_gol + dep_gol
-                            goller.append(toplam_gol)
-                            
-                            # Sonuçları da burada hesapla
-                            if ev_gol > dep_gol:
-                                sonuclar.append("Ev Sahibi Kazandı")
-                            elif ev_gol < dep_gol:
-                                sonuclar.append("Deplasman Kazandı")
-                            else:
-                                sonuclar.append("Berabere")
+                    result_df = find_similar_matches(
+                        df, 
+                        similarity_matrix, 
+                        selected_idx,
+                        min_similarity=min_similarity
+                    )
                     
-                    sonuc_dagilimi = pd.Series(sonuclar).value_counts()
-                    
-                    # Metrik kartları - İlk row
-                    col1, col2, col3 = st.columns(3)
-                    
-                    with col1:
-                        # Maç başına gol dağılımı analizi
-                        mac_gol_dagilimi = {
-                            "0-1 Gol": 0,
-                            "2-3 Gol": 0,
-                            "4+ Gol": 0
+                    if result_df is not None:
+                        # Format sözlüğünü oluştur
+                        format_dict = {
+                            'MS1': '{:.2f}', 'MS0': '{:.2f}', 'MS2': '{:.2f}',
+                            'AU2.5 Alt': '{:.2f}', 'AU2.5 Üst': '{:.2f}',
+                            'KG Var': '{:.2f}', 'KG Yok': '{:.2f}',
+                            'IY0.5 Alt': '{:.2f}', 'IY0.5 Üst': '{:.2f}',
+                            'AU1.5 Alt': '{:.2f}', 'AU1.5 Üst': '{:.2f}',
+                            'IY1': '{:.2f}', 'IY0': '{:.2f}', 'IY2': '{:.2f}',
+                            '2Y1': '{:.2f}', '2Y0': '{:.2f}', '2Y2': '{:.2f}',
+                            'Tek': '{:.2f}', 'Çift': '{:.2f}',
+                            'IY/MS 1/1': '{:.2f}', 'IY/MS 1/0': '{:.2f}', 'IY/MS 1/2': '{:.2f}',
+                            'IY/MS 0/1': '{:.2f}', 'IY/MS 0/0': '{:.2f}', 'IY/MS 0/2': '{:.2f}',
+                            'IY/MS 2/1': '{:.2f}', 'IY/MS 2/0': '{:.2f}', 'IY/MS 2/2': '{:.2f}',
+                            'Similarity': '{:.2%}'
                         }
-                        
-                        for gol in goller:
-                            if gol <= 1:
-                                mac_gol_dagilimi["0-1 Gol"] += 1
-                            elif gol <= 3:
-                                mac_gol_dagilimi["2-3 Gol"] += 1
-                            else:
-                                mac_gol_dagilimi["4+ Gol"] += 1
-                        
-                        en_yaygin_aralik = max(mac_gol_dagilimi.items(), key=lambda x: x[1])[0]
-                        en_yaygin_oran = (mac_gol_dagilimi[en_yaygin_aralik] / len(goller) * 100)
-                        
-                        st.metric(
-                            "En Yaygın Gol Aralığı",
-                            en_yaygin_aralik,
-                            f"%{en_yaygin_oran:.0f}",
-                            help="Benzer maçlarda en sık görülen gol aralığı ve yüzdesi"
-                        )
-                    
-                    with col2:
-                        # İlk yarı gol dağılımı analizi
-                        iy_gol_dagilimi = {
-                            "0 Gol": 0,
-                            "1 Gol": 0,
-                            "2+ Gol": 0
-                        }
-                        
-                        for _, row in result_df.iloc[1:].iterrows():
-                            if row['İY'] != '-':
-                                iy_ev, iy_dep = map(int, row['İY'].split('-'))
-                                iy_toplam = iy_ev + iy_dep
-                                
-                                if iy_toplam == 0:
-                                    iy_gol_dagilimi["0 Gol"] += 1
-                                elif iy_toplam == 1:
-                                    iy_gol_dagilimi["1 Gol"] += 1
-                                else:
-                                    iy_gol_dagilimi["2+ Gol"] += 1
-                        
-                        en_yaygin_iy = max(iy_gol_dagilimi.items(), key=lambda x: x[1])[0]
-                        en_yaygin_iy_oran = (iy_gol_dagilimi[en_yaygin_iy] / sum(iy_gol_dagilimi.values()) * 100)
-                        
-                        st.metric(
-                            "İlk Yarı En Yaygın Gol",
-                            en_yaygin_iy,
-                            f"%{en_yaygin_iy_oran:.0f}",
-                            help="Benzer maçlarda ilk yarıda en sık görülen gol sayısı ve yüzdesi"
-                        )
-                    
-                    with col3:
-                        st.write("##### İlk Yarı Gol Dağılımı")
-                        # İlk yarı gol dağılımını tablo olarak göster
-                        for gol_sayisi, mac_sayisi in iy_gol_dagilimi.items():
-                            toplam = sum(iy_gol_dagilimi.values())
-                            yuzde = (mac_sayisi / toplam * 100) if toplam > 0 else 0
-                            st.write(f"**{gol_sayisi}:** {mac_sayisi} maç ({yuzde:.0f}%)")
 
-                    # Taraf analizi için yeni row
-                    st.write("")  # Boşluk ekle
-                    col4, col5, col6 = st.columns(3)
-                    
-                    with col4:
-                        # Maç sonucu analizi
-                        mac_sonuclari = []
-                        for _, row in result_df.iloc[1:].iterrows():
-                            if row['Skor'] != '-':
-                                ev_gol, dep_gol = map(int, row['Skor'].split('-'))
-                                if ev_gol > dep_gol:
-                                    mac_sonuclari.append("Ev Sahibi")
-                                elif ev_gol < dep_gol:
-                                    mac_sonuclari.append("Deplasman")
-                                else:
-                                    mac_sonuclari.append("Beraberlik")
+                        # Temel bilgi sütunları + seçili kriterler
+                        base_columns = ['Tarih', 'Saat', 'Lig', 'MBS', 'Ev Sahibi', 'Skor', 'Deplasman', 'İY']
                         
-                        sonuc_dagilimi = pd.Series(mac_sonuclari).value_counts()
-                        en_yaygin_sonuc = sonuc_dagilimi.index[0] if not sonuc_dagilimi.empty else "-"
-                        sonuc_oran = (sonuc_dagilimi.iloc[0] / len(mac_sonuclari) * 100) if not sonuc_dagilimi.empty else 0
-                        
-                        st.metric(
-                            "En Yaygın Maç Sonucu",
-                            en_yaygin_sonuc,
-                            f"%{sonuc_oran:.0f}",
-                            help="Benzer maçlarda en sık görülen maç sonucu ve yüzdesi"
-                        )
-                    
-                    with col5:
-                        # İlk yarı sonucu analizi
-                        iy_sonuclari = []
-                        for _, row in result_df.iloc[1:].iterrows():
-                            if row['İY'] != '-':
-                                iy_ev, iy_dep = map(int, row['İY'].split('-'))
-                                if iy_ev > iy_dep:
-                                    iy_sonuclari.append("Ev Sahibi")
-                                elif iy_ev < iy_dep:
-                                    iy_sonuclari.append("Deplasman")
-                                else:
-                                    iy_sonuclari.append("Beraberlik")
-                        
-                        iy_dagilimi = pd.Series(iy_sonuclari).value_counts()
-                        en_yaygin_iy_sonuc = iy_dagilimi.index[0] if not iy_dagilimi.empty else "-"
-                        iy_sonuc_oran = (iy_dagilimi.iloc[0] / len(iy_sonuclari) * 100) if not iy_dagilimi.empty else 0
-                        
-                        st.metric(
-                            "En Yaygın İY Sonucu",
-                            en_yaygin_iy_sonuc,
-                            f"%{iy_sonuc_oran:.0f}",
-                            help="Benzer maçlarda en sık görülen ilk yarı sonucu ve yüzdesi"
-                        )
-                    
-                    with col6:
-                        # İkinci yarı sonucu analizi
-                        iy2_sonuclari = []
-                        for _, row in result_df.iloc[1:].iterrows():
-                            if row['İY'] != '-' and row['Skor'] != '-':
-                                # İlk yarı skorları
-                                iy_ev, iy_dep = map(int, row['İY'].split('-'))
-                                # Maç sonu skorları
-                                ms_ev, ms_dep = map(int, row['Skor'].split('-'))
-                                # İkinci yarı skorları
-                                iy2_ev = ms_ev - iy_ev
-                                iy2_dep = ms_dep - iy_dep
-                                
-                                if iy2_ev > iy2_dep:
-                                    iy2_sonuclari.append("Ev Sahibi")
-                                elif iy2_ev < iy2_dep:
-                                    iy2_sonuclari.append("Deplasman")
-                                else:
-                                    iy2_sonuclari.append("Beraberlik")
-                        
-                        iy2_dagilimi = pd.Series(iy2_sonuclari).value_counts()
-                        en_yaygin_iy2_sonuc = iy2_dagilimi.index[0] if not iy2_dagilimi.empty else "-"
-                        iy2_sonuc_oran = (iy2_dagilimi.iloc[0] / len(iy2_sonuclari) * 100) if not iy2_dagilimi.empty else 0
-                        
-                        st.metric(
-                            "En Yaygın 2Y Sonucu",
-                            en_yaygin_iy2_sonuc,
-                            f"%{iy2_sonuc_oran:.0f}",
-                            help="Benzer maçlarda en sık görülen ikinci yarı sonucu ve yüzdesi"
+                        # Seçilen maçı göster
+                        st.write("### Seçilen Maç")
+                        selected_columns = base_columns + selected_criteria
+                        st.dataframe(
+                            result_df.iloc[[0]][selected_columns].style
+                            .format(format_dict)
                         )
 
-                    # Grafikler için sekmeler
-                    tab1, tab2, tab3 = st.tabs(["Detaylı İstatistikler", "Gol Analizi", "İY/MS Analizi"])
-                    
-                    with tab1:
-                        # Detaylı istatistikler
-                        col1, col2 = st.columns(2)
+                        # Benzer maçları göster
+                        st.write("### En Benzer 5 Maç")
+                        display_columns = ['Similarity'] + base_columns + selected_criteria
                         
-                        with col1:
-                            st.write("##### Gol İstatistikleri")
-                            st.write(f"- En çok gol: {max(goller) if goller else '-'}")
-                            st.write(f"- En az gol: {min(goller) if goller else '-'}")
+                        # Format sözlüğünü seçili kriterler için güncelle
+                        selected_format_dict = {col: '{:.2f}' for col in selected_criteria}
+                        selected_format_dict['Similarity'] = '{:.2%}'
+                        
+                        st.dataframe(
+                            result_df.iloc[1:][display_columns].style
+                            .format(selected_format_dict)
+                        )
+
+                        # Tüm oranları içeren yeni tablo
+                        st.write("### Tüm Oranlar")
+                        
+                        # Tüm oran sütunlarını içeren liste
+                        all_odds_columns = [
+                            'MS1', 'MS0', 'MS2', 'AU2.5 Alt', 'AU2.5 Üst',
+                            'KG Var', 'KG Yok', 'IY0.5 Alt', 'IY0.5 Üst',
+                            'AU1.5 Alt', 'AU1.5 Üst', 'IY1', 'IY0', 'IY2',
+                            '2Y1', '2Y0', '2Y2', 'Tek', 'Çift',
+                            'IY/MS 1/1', 'IY/MS 1/0', 'IY/MS 1/2',
+                            'IY/MS 0/1', 'IY/MS 0/0', 'IY/MS 0/2',
+                            'IY/MS 2/1', 'IY/MS 2/0', 'IY/MS 2/2'
+                        ]
+                        
+                        # Temel bilgi sütunları + tüm oranlar
+                        full_display_columns = ['Similarity'] + base_columns + all_odds_columns
+                        
+                        # Format sözlüğünü tüm oranlar için güncelle
+                        full_format_dict = {col: '{:.2f}' for col in all_odds_columns}
+                        full_format_dict['Similarity'] = '{:.2%}'
+                        
+                        # İlk satır için stil fonksiyonu
+                        def highlight_first_row(x):
+                            return ['background-color: #272727' if i == 0 else '' for i in range(len(x))]
+                        
+                        st.dataframe(
+                            result_df[full_display_columns].style
+                            .format(full_format_dict)
+                            .apply(highlight_first_row, axis=0)
+                        )
+
+                        # Analiz Bölümü
+                        with st.container():
+                            st.write("### Benzer Maçların Analizi")
                             
-                            # 2.5 Üstü analizi
-                            ustu_mac = len([g for g in goller if g > 2])
-                            toplam_mac = len(goller)
-                            ustu_oran = (ustu_mac / toplam_mac * 100) if toplam_mac > 0 else 0
-                            st.write(f"- 2.5 Üstü Maç Oranı: {ustu_oran:.1f}% ({ustu_mac}/{toplam_mac})")
-                            
-                            # İlk Yarı 1.5 Üstü analizi
-                            iy_15_ustu = 0
-                            toplam_mac = 0
-                            for _, row in result_df.iloc[1:].iterrows():
-                                if row['İY'] != '-':
-                                    iy_ev, iy_dep = map(int, row['İY'].split('-'))
-                                    if (iy_ev + iy_dep) > 1:
-                                        iy_15_ustu += 1
-                                    toplam_mac += 1
-                            
-                            iy_15_oran = (iy_15_ustu / toplam_mac * 100) if toplam_mac > 0 else 0
-                            st.write(f"- İY 1.5 Üstü Oranı: {iy_15_oran:.1f}% ({iy_15_ustu}/{toplam_mac})")
-                            
-                            # Karşılıklı Gol analizi
-                            kg_var = 0
-                            toplam_mac = 0
+                            # Goller listesini başta hazırla
+                            goller = []
+                            sonuclar = []
                             for _, row in result_df.iloc[1:].iterrows():
                                 if row['Skor'] != '-':
                                     ev_gol, dep_gol = map(int, row['Skor'].split('-'))
-                                    if ev_gol > 0 and dep_gol > 0:
-                                        kg_var += 1
-                                    toplam_mac += 1
-                            
-                            kg_oran = (kg_var / toplam_mac * 100) if toplam_mac > 0 else 0
-                            st.write(f"- Karşılıklı Gol Oranı: {kg_oran:.1f}% ({kg_var}/{toplam_mac})")
-                        
-                        with col2:
-                            st.write("##### Sonuç İstatistikleri")
-                            sonuc_dagilimi = pd.Series(sonuclar).value_counts()
-                            for sonuc, count in sonuc_dagilimi.items():
-                                st.write(f"- {sonuc}: {count} maç ({count/len(sonuclar)*100:.1f}%)")
-                    
-                    with tab2:
-                        col1, col2 = st.columns(2)
-                        with col1:
-                            # Mevcut gol dağılımı grafiği
-                            gol_dagilimi = pd.Series(goller).value_counts().sort_index()
-                            fig = px.bar(
-                                x=gol_dagilimi.index,
-                                y=gol_dagilimi.values,
-                                title="Toplam Gol Dağılımı",
-                                labels={'x': 'Toplam Gol', 'y': 'Maç Sayısı'},
-                                color_discrete_sequence=['#FF9999']
-                            )
-                            fig.update_layout(showlegend=False)
-                            st.plotly_chart(fig, use_container_width=True)
-                        
-                        with col2:
-                            # İlk Yarı/İkinci Yarı gol karşılaştırması
-                            iy_goller = []
-                            iy2_goller = []
-                            mac_bilgileri = []
-                            
-                            for _, row in result_df.iloc[1:].iterrows():
-                                if row['İY'] != '-' and row['Skor'] != '-':
-                                    iy_ev, iy_dep = map(int, row['İY'].split('-'))
-                                    ms_ev, ms_dep = map(int, row['Skor'].split('-'))
-                                    iy_toplam = iy_ev + iy_dep
-                                    iy2_toplam = (ms_ev + ms_dep) - (iy_ev + iy_dep)
+                                    toplam_gol = ev_gol + dep_gol
+                                    goller.append(toplam_gol)
                                     
-                                    mac_bilgileri.append({
-                                        'Maç': f"{row['Ev Sahibi']}-{row['Deplasman']}",
-                                        'İlk Yarı': iy_toplam,
-                                        'İkinci Yarı': iy2_toplam
-                                    })
+                                    # Sonuçları da burada hesapla
+                                    if ev_gol > dep_gol:
+                                        sonuclar.append("Ev Sahibi Kazandı")
+                                    elif ev_gol < dep_gol:
+                                        sonuclar.append("Deplasman Kazandı")
+                                    else:
+                                        sonuclar.append("Berabere")
                             
-                            df_yari = pd.DataFrame(mac_bilgileri)
+                            sonuc_dagilimi = pd.Series(sonuclar).value_counts()
                             
-                            fig = px.bar(df_yari, 
-                                       x='Maç',
-                                       y=['İlk Yarı', 'İkinci Yarı'],
-                                       title="Yarı Bazında Gol Dağılımı",
-                                       barmode='group',
-                                       color_discrete_sequence=['#FF9999', '#66B2FF'])
+                            # Metrik kartları - İlk row
+                            col1, col2, col3 = st.columns(3)
                             
-                            fig.update_layout(
-                                xaxis_tickangle=-45,
-                                legend_title=None,
-                                height=400,
-                                margin=dict(t=30, b=100)  # Alt kısımda takım isimleri için daha fazla boşluk
-                            )
-                            st.plotly_chart(fig, use_container_width=True)
-                    
-                    with tab3:
-                        # Mevcut İY/MS analizi grafiği (geliştirilmiş)
-                        iy_ms_analiz = []
-                        for _, row in result_df.iloc[1:].iterrows():
-                            if row['İY'] != '-' and row['Skor'] != '-':
-                                iy_ev, iy_dep = map(int, row['İY'].split('-'))
-                                ms_ev, ms_dep = map(int, row['Skor'].split('-'))
+                            with col1:
+                                # Maç başına gol dağılımı analizi
+                                mac_gol_dagilimi = {
+                                    "0-1 Gol": 0,
+                                    "2-3 Gol": 0,
+                                    "4+ Gol": 0
+                                }
                                 
-                                # İlk yarı sonucu
-                                if iy_ev > iy_dep: iy_sonuc = "1"
-                                elif iy_ev < iy_dep: iy_sonuc = "2"
-                                else: iy_sonuc = "0"
+                                for gol in goller:
+                                    if gol <= 1:
+                                        mac_gol_dagilimi["0-1 Gol"] += 1
+                                    elif gol <= 3:
+                                        mac_gol_dagilimi["2-3 Gol"] += 1
+                                    else:
+                                        mac_gol_dagilimi["4+ Gol"] += 1
                                 
-                                # Maç sonucu
-                                if ms_ev > ms_dep: ms_sonuc = "1"
-                                elif ms_ev < ms_dep: ms_sonuc = "2"
-                                else: ms_sonuc = "0"
+                                en_yaygin_aralik = max(mac_gol_dagilimi.items(), key=lambda x: x[1])[0]
+                                en_yaygin_oran = (mac_gol_dagilimi[en_yaygin_aralik] / len(goller) * 100)
                                 
-                                iy_ms_analiz.append(f"{iy_sonuc}/{ms_sonuc}")
+                                st.metric(
+                                    "En Yaygın Gol Aralığı",
+                                    en_yaygin_aralik,
+                                    f"%{en_yaygin_oran:.0f}",
+                                    help="Benzer maçlarda en sık görülen gol aralığı ve yüzdesi"
+                                )
+                            
+                            with col2:
+                                # İlk yarı gol dağılımı analizi
+                                iy_gol_dagilimi = {
+                                    "0 Gol": 0,
+                                    "1 Gol": 0,
+                                    "2+ Gol": 0
+                                }
+                                
+                                for _, row in result_df.iloc[1:].iterrows():
+                                    if row['İY'] != '-':
+                                        iy_ev, iy_dep = map(int, row['İY'].split('-'))
+                                        iy_toplam = iy_ev + iy_dep
+                                        
+                                        if iy_toplam == 0:
+                                            iy_gol_dagilimi["0 Gol"] += 1
+                                        elif iy_toplam == 1:
+                                            iy_gol_dagilimi["1 Gol"] += 1
+                                        else:
+                                            iy_gol_dagilimi["2+ Gol"] += 1
+                                
+                                en_yaygin_iy = max(iy_gol_dagilimi.items(), key=lambda x: x[1])[0]
+                                en_yaygin_iy_oran = (iy_gol_dagilimi[en_yaygin_iy] / sum(iy_gol_dagilimi.values()) * 100)
+                                
+                                st.metric(
+                                    "İlk Yarı En Yaygın Gol",
+                                    en_yaygin_iy,
+                                    f"%{en_yaygin_iy_oran:.0f}",
+                                    help="Benzer maçlarda ilk yarıda en sık görülen gol sayısı ve yüzdesi"
+                                )
+                            
+                            with col3:
+                                st.write("##### İlk Yarı Gol Dağılımı")
+                                # İlk yarı gol dağılımını tablo olarak göster
+                                for gol_sayisi, mac_sayisi in iy_gol_dagilimi.items():
+                                    toplam = sum(iy_gol_dagilimi.values())
+                                    yuzde = (mac_sayisi / toplam * 100) if toplam > 0 else 0
+                                    st.write(f"**{gol_sayisi}:** {mac_sayisi} maç ({yuzde:.0f}%)")
 
-                        iy_ms_dagilimi = pd.Series(iy_ms_analiz).value_counts()
-                        fig = px.bar(
-                            x=iy_ms_dagilimi.index,
-                            y=iy_ms_dagilimi.values,
-                            title="İY/MS Kombinasyonları",
-                            labels={'x': 'İY/MS', 'y': 'Maç Sayısı'},
-                            color=iy_ms_dagilimi.values,
-                            color_continuous_scale='Viridis'
-                        )
-                        fig.update_layout(coloraxis_showscale=False)
-                        st.plotly_chart(fig, use_container_width=True)
+                            # Taraf analizi için yeni row
+                            st.write("")  # Boşluk ekle
+                            col4, col5, col6 = st.columns(3)
+                            
+                            with col4:
+                                # Maç sonucu analizi
+                                mac_sonuclari = []
+                                for _, row in result_df.iloc[1:].iterrows():
+                                    if row['Skor'] != '-':
+                                        ev_gol, dep_gol = map(int, row['Skor'].split('-'))
+                                        if ev_gol > dep_gol:
+                                            mac_sonuclari.append("Ev Sahibi")
+                                        elif ev_gol < dep_gol:
+                                            mac_sonuclari.append("Deplasman")
+                                        else:
+                                            mac_sonuclari.append("Beraberlik")
+                                
+                                sonuc_dagilimi = pd.Series(mac_sonuclari).value_counts()
+                                en_yaygin_sonuc = sonuc_dagilimi.index[0] if not sonuc_dagilimi.empty else "-"
+                                sonuc_oran = (sonuc_dagilimi.iloc[0] / len(mac_sonuclari) * 100) if not sonuc_dagilimi.empty else 0
+                                
+                                st.metric(
+                                    "En Yaygın Maç Sonucu",
+                                    en_yaygin_sonuc,
+                                    f"%{sonuc_oran:.0f}",
+                                    help="Benzer maçlarda en sık görülen maç sonucu ve yüzdesi"
+                                )
+                            
+                            with col5:
+                                # İlk yarı sonucu analizi
+                                iy_sonuclari = []
+                                for _, row in result_df.iloc[1:].iterrows():
+                                    if row['İY'] != '-':
+                                        iy_ev, iy_dep = map(int, row['İY'].split('-'))
+                                        if iy_ev > iy_dep:
+                                            iy_sonuclari.append("Ev Sahibi")
+                                        elif iy_ev < iy_dep:
+                                            iy_sonuclari.append("Deplasman")
+                                        else:
+                                            iy_sonuclari.append("Beraberlik")
+                                
+                                iy_dagilimi = pd.Series(iy_sonuclari).value_counts()
+                                en_yaygin_iy_sonuc = iy_dagilimi.index[0] if not iy_dagilimi.empty else "-"
+                                iy_sonuc_oran = (iy_dagilimi.iloc[0] / len(iy_sonuclari) * 100) if not iy_dagilimi.empty else 0
+                                
+                                st.metric(
+                                    "En Yaygın İY Sonucu",
+                                    en_yaygin_iy_sonuc,
+                                    f"%{iy_sonuc_oran:.0f}",
+                                    help="Benzer maçlarda en sık görülen ilk yarı sonucu ve yüzdesi"
+                                )
+                            
+                            with col6:
+                                # İkinci yarı sonucu analizi
+                                iy2_sonuclari = []
+                                for _, row in result_df.iloc[1:].iterrows():
+                                    if row['İY'] != '-' and row['Skor'] != '-':
+                                        # İlk yarı skorları
+                                        iy_ev, iy_dep = map(int, row['İY'].split('-'))
+                                        # Maç sonu skorları
+                                        ms_ev, ms_dep = map(int, row['Skor'].split('-'))
+                                        # İkinci yarı skorları
+                                        iy2_ev = ms_ev - iy_ev
+                                        iy2_dep = ms_dep - iy_dep
+                                        
+                                        if iy2_ev > iy2_dep:
+                                            iy2_sonuclari.append("Ev Sahibi")
+                                        elif iy2_ev < iy2_dep:
+                                            iy2_sonuclari.append("Deplasman")
+                                        else:
+                                            iy2_sonuclari.append("Beraberlik")
+                                
+                                iy2_dagilimi = pd.Series(iy2_sonuclari).value_counts()
+                                en_yaygin_iy2_sonuc = iy2_dagilimi.index[0] if not iy2_dagilimi.empty else "-"
+                                iy2_sonuc_oran = (iy2_dagilimi.iloc[0] / len(iy2_sonuclari) * 100) if not iy2_dagilimi.empty else 0
+                                
+                                st.metric(
+                                    "En Yaygın 2Y Sonucu",
+                                    en_yaygin_iy2_sonuc,
+                                    f"%{iy2_sonuc_oran:.0f}",
+                                    help="Benzer maçlarda en sık görülen ikinci yarı sonucu ve yüzdesi"
+                                )
 
-                    with col1:
-                        st.write("##### Maç Maç Gol Dağılımı")
-                        for idx, row in result_df.iloc[1:].iterrows():
-                            if row['Skor'] != '-':
-                                ev_gol, dep_gol = map(int, row['Skor'].split('-'))
-                                toplam_gol = ev_gol + dep_gol
-                                st.write(f"• {row['Ev Sahibi']} {row['Skor']} {row['Deplasman']}: **{toplam_gol}** gol")
+                            # Grafikler için sekmeler
+                            tab1, tab2, tab3, tab4 = st.tabs(["Detaylı İstatistikler", "Gol Analizi", "İY/MS Analizi", "Form Analizi"])
+                            
+                            with tab1:
+                                # Detaylı istatistikler
+                                col1, col2 = st.columns(2)
+                                
+                                with col1:
+                                    st.write("##### Gol İstatistikleri")
+                                    st.write(f"- En çok gol: {max(goller) if goller else '-'}")
+                                    st.write(f"- En az gol: {min(goller) if goller else '-'}")
+                                    
+                                    # 2.5 Üstü analizi
+                                    ustu_mac = len([g for g in goller if g > 2])
+                                    toplam_mac = len(goller)
+                                    ustu_oran = (ustu_mac / toplam_mac * 100) if toplam_mac > 0 else 0
+                                    st.write(f"- 2.5 Üstü Maç Oranı: {ustu_oran:.1f}% ({ustu_mac}/{toplam_mac})")
+                                    
+                                    # İlk Yarı 1.5 Üstü analizi
+                                    iy_15_ustu = 0
+                                    toplam_mac = 0
+                                    for _, row in result_df.iloc[1:].iterrows():
+                                        if row['İY'] != '-':
+                                            iy_ev, iy_dep = map(int, row['İY'].split('-'))
+                                            if (iy_ev + iy_dep) > 1:
+                                                iy_15_ustu += 1
+                                            toplam_mac += 1
+                                    
+                                    iy_15_oran = (iy_15_ustu / toplam_mac * 100) if toplam_mac > 0 else 0
+                                    st.write(f"- İY 1.5 Üstü Oranı: {iy_15_oran:.1f}% ({iy_15_ustu}/{toplam_mac})")
+                                    
+                                    # Karşılıklı Gol analizi
+                                    kg_var = 0
+                                    toplam_mac = 0
+                                    for _, row in result_df.iloc[1:].iterrows():
+                                        if row['Skor'] != '-':
+                                            ev_gol, dep_gol = map(int, row['Skor'].split('-'))
+                                            if ev_gol > 0 and dep_gol > 0:
+                                                kg_var += 1
+                                            toplam_mac += 1
+                                    
+                                    kg_oran = (kg_var / toplam_mac * 100) if toplam_mac > 0 else 0
+                                    st.write(f"- Karşılıklı Gol Oranı: {kg_oran:.1f}% ({kg_var}/{toplam_mac})")
+                                
+                                with col2:
+                                    st.write("##### Sonuç İstatistikleri")
+                                    sonuc_dagilimi = pd.Series(sonuclar).value_counts()
+                                    for sonuc, count in sonuc_dagilimi.items():
+                                        st.write(f"- {sonuc}: {count} maç ({count/len(sonuclar)*100:.1f}%)")
+                            
+                            with tab2:
+                                col1, col2 = st.columns(2)
+                                with col1:
+                                    # Mevcut gol dağılımı grafiği
+                                    gol_dagilimi = pd.Series(goller).value_counts().sort_index()
+                                    fig = px.bar(
+                                        x=gol_dagilimi.index,
+                                        y=gol_dagilimi.values,
+                                        title="Toplam Gol Dağılımı",
+                                        labels={'x': 'Toplam Gol', 'y': 'Maç Sayısı'},
+                                        color_discrete_sequence=['#FF9999']
+                                    )
+                                    fig.update_layout(showlegend=False)
+                                    st.plotly_chart(fig, use_container_width=True)
+                                
+                                with col2:
+                                    # İlk Yarı/İkinci Yarı gol karşılaştırması
+                                    iy_goller = []
+                                    iy2_goller = []
+                                    mac_bilgileri = []
+                                    
+                                    for _, row in result_df.iloc[1:].iterrows():
+                                        if row['İY'] != '-' and row['Skor'] != '-':
+                                            iy_ev, iy_dep = map(int, row['İY'].split('-'))
+                                            ms_ev, ms_dep = map(int, row['Skor'].split('-'))
+                                            iy_toplam = iy_ev + iy_dep
+                                            iy2_toplam = (ms_ev + ms_dep) - (iy_ev + iy_dep)
+                                            
+                                            mac_bilgileri.append({
+                                                'Maç': f"{row['Ev Sahibi']}-{row['Deplasman']}",
+                                                'İlk Yarı': iy_toplam,
+                                                'İkinci Yarı': iy2_toplam
+                                            })
+                                    
+                                    df_yari = pd.DataFrame(mac_bilgileri)
+                                    
+                                    fig = px.bar(df_yari, 
+                                               x='Maç',
+                                               y=['İlk Yarı', 'İkinci Yarı'],
+                                               title="Yarı Bazında Gol Dağılımı",
+                                               barmode='group',
+                                               color_discrete_sequence=['#FF9999', '#66B2FF'])
+                                    
+                                    fig.update_layout(
+                                        xaxis_tickangle=-45,
+                                        legend_title=None,
+                                        height=400,
+                                        margin=dict(t=30, b=100)  # Alt kısımda takım isimleri için daha fazla boşluk
+                                    )
+                                    st.plotly_chart(fig, use_container_width=True)
+                            
+                            with tab3:
+                                # Mevcut İY/MS analizi grafiği (geliştirilmiş)
+                                iy_ms_analiz = []
+                                for _, row in result_df.iloc[1:].iterrows():
+                                    if row['İY'] != '-' and row['Skor'] != '-':
+                                        iy_ev, iy_dep = map(int, row['İY'].split('-'))
+                                        ms_ev, ms_dep = map(int, row['Skor'].split('-'))
+                                        
+                                        # İlk yarı sonucu
+                                        if iy_ev > iy_dep: iy_sonuc = "1"
+                                        elif iy_ev < iy_dep: iy_sonuc = "2"
+                                        else: iy_sonuc = "0"
+                                        
+                                        # Maç sonucu
+                                        if ms_ev > ms_dep: ms_sonuc = "1"
+                                        elif ms_ev < ms_dep: ms_sonuc = "2"
+                                        else: ms_sonuc = "0"
+                                        
+                                        iy_ms_analiz.append(f"{iy_sonuc}/{ms_sonuc}")
 
-                    with col2:
-                        st.write("##### Maç Maç İlk Yarı Golleri")
-                        for idx, row in result_df.iloc[1:].iterrows():
-                            if row['İY'] != '-':
-                                iy_ev, iy_dep = map(int, row['İY'].split('-'))
-                                iy_toplam = iy_ev + iy_dep
-                                st.write(f"• {row['Ev Sahibi']} {row['İY']} {row['Deplasman']}: **{iy_toplam}** gol")
+                                iy_ms_dagilimi = pd.Series(iy_ms_analiz).value_counts()
+                                fig = px.bar(
+                                    x=iy_ms_dagilimi.index,
+                                    y=iy_ms_dagilimi.values,
+                                    title="İY/MS Kombinasyonları",
+                                    labels={'x': 'İY/MS', 'y': 'Maç Sayısı'},
+                                    color=iy_ms_dagilimi.values,
+                                    color_continuous_scale='Viridis'
+                                )
+                                fig.update_layout(coloraxis_showscale=False)
+                                st.plotly_chart(fig, use_container_width=True)
 
-                    # Yapay Zeka Analiz Bölümü
-                    with st.container():
-                        st.write("### 🤖 Maç Analizi")
-                        
-                        # Seçilen maç bilgileri
-                        secilen_mac = result_df.iloc[0]
-                        ev_sahibi = secilen_mac['Ev Sahibi']
-                        deplasman = secilen_mac['Deplasman']
-                        
-                        # Benzer maçların analizi
-                        benzer_maclar = result_df.iloc[1:]
-                        
-                        # Gol eğilimleri
-                        ust_25_oran = len([g for g in goller if g > 2]) / len(goller) * 100
-                        iy_15_oran = len([g for g in iy_goller if g > 1]) / len(iy_goller) * 100 if iy_goller else 0
-                        kg_oran = kg_var / toplam_mac * 100 if toplam_mac > 0 else 0
-                        
-                        # Sonuç eğilimi
-                        sonuc_egilimi = sonuc_dagilimi.index[0] if not sonuc_dagilimi.empty else "Belirsiz"
-                        
-                        # Analiz metni oluştur
-                        analiz = f"""
-                            {ev_sahibi} - {deplasman} maçı için bulunan en benzer 5 maç analiz edildiğinde şu sonuçlara ulaşılmıştır:
+                            with col1:
+                                st.write("##### Maç Maç Gol Dağılımı")
+                                for idx, row in result_df.iloc[1:].iterrows():
+                                    if row['Skor'] != '-':
+                                        ev_gol, dep_gol = map(int, row['Skor'].split('-'))
+                                        toplam_gol = ev_gol + dep_gol
+                                        st.write(f"• {row['Ev Sahibi']} {row['Skor']} {row['Deplasman']}: **{toplam_gol}** gol")
 
-                            Benzer maçların {en_yaygin_aralik.lower()} ile sonuçlanma eğilimi %{en_yaygin_oran:.0f} oranında öne çıkmaktadır. İlk yarılarda ise en sık {en_yaygin_iy.lower()} görülme oranı %{en_yaygin_iy_oran:.0f}'dir. 
+                            with col2:
+                                st.write("##### Maç Maç İlk Yarı Golleri")
+                                for idx, row in result_df.iloc[1:].iterrows():
+                                    if row['İY'] != '-':
+                                        iy_ev, iy_dep = map(int, row['İY'].split('-'))
+                                        iy_toplam = iy_ev + iy_dep
+                                        st.write(f"• {row['Ev Sahibi']} {row['İY']} {row['Deplasman']}: **{iy_toplam}** gol")
 
-                            Benzer maçlarda {sonuc_egilimi.lower()} sonucu ağır basmaktadır. Maçların %{ust_25_oran:.0f}'i 2.5 üstü golle sonuçlanırken, %{kg_oran:.0f}'inde karşılıklı gol görülmüştür. İlk yarılarda 1.5 üstü gol görülme oranı %{iy_15_oran:.0f}'dir.
+                            # Yapay Zeka Analiz Bölümü
+                            with st.container():
+                                st.write("### 🤖 Maç Analizi")
+                                
+                                # Seçilen maç bilgileri
+                                secilen_mac = result_df.iloc[0]
+                                ev_sahibi = secilen_mac['Ev Sahibi']
+                                deplasman = secilen_mac['Deplasman']
+                                
+                                # Benzer maçların analizi
+                                benzer_maclar = result_df.iloc[1:]
+                                
+                                # Gol eğilimleri
+                                ust_25_oran = len([g for g in goller if g > 2]) / len(goller) * 100
+                                iy_15_oran = len([g for g in iy_goller if g > 1]) / len(iy_goller) * 100 if iy_goller else 0
+                                kg_oran = kg_var / toplam_mac * 100 if toplam_mac > 0 else 0
+                                
+                                # Sonuç eğilimi
+                                sonuc_egilimi = sonuc_dagilimi.index[0] if not sonuc_dagilimi.empty else "Belirsiz"
+                                
+                                # Analiz metni oluştur
+                                analiz = f"""
+                                    {ev_sahibi} - {deplasman} maçı için bulunan en benzer 5 maç analiz edildiğinde şu sonuçlara ulaşılmıştır:
 
-                            En yüksek benzerlik oranına sahip maç %{result_df.iloc[1]['Similarity']*100:.0f} benzerlik ile {result_df.iloc[1]['Ev Sahibi']} - {result_df.iloc[1]['Deplasman']} karşılaşmasıdır ve bu maç {result_df.iloc[1]['Skor']} sonuçlanmıştır.
-                        """
-                        st.write(analiz)
+                                    Benzer maçların {en_yaygin_aralik.lower()} ile sonuçlanma eğilimi %{en_yaygin_oran:.0f} oranında öne çıkmaktadır. İlk yarılarda ise en sık {en_yaygin_iy.lower()} görülme oranı %{en_yaygin_iy_oran:.0f}'dir. 
+
+                                    Benzer maçlarda {sonuc_egilimi.lower()} sonucu ağır basmaktadır. Maçların %{ust_25_oran:.0f}'i 2.5 üstü golle sonuçlanırken, %{kg_oran:.0f}'inde karşılıklı gol görülmüştür. İlk yarılarda 1.5 üstü gol görülme oranı %{iy_15_oran:.0f}'dir.
+
+                                    En yüksek benzerlik oranına sahip maç %{result_df.iloc[1]['Similarity']*100:.0f} benzerlik ile {result_df.iloc[1]['Ev Sahibi']} - {result_df.iloc[1]['Deplasman']} karşılaşmasıdır ve bu maç {result_df.iloc[1]['Skor']} sonuçlanmıştır.
+                                """
+                                st.write(analiz)
+
+                            with tab4:
+                                st.write("##### Form Analizi")
+                                
+                                # Ev sahibinin son 5 maçı
+                                st.write(f"**{ev_sahibi} Son 5 Maçı**")
+                                ev_son5 = df[
+                                    ((df['Ev Sahibi'] == ev_sahibi) | (df['Deplasman'] == ev_sahibi)) &
+                                    (df['Tarih'] < result_df.iloc[0]['Tarih'])
+                                ]
+                                ev_son5['Tarih'] = pd.to_datetime(ev_son5['Tarih'], format='%d.%m.%Y')
+                                ev_son5 = ev_son5.sort_values('Tarih', ascending=False).head(5)
+                                ev_son5['Tarih'] = ev_son5['Tarih'].dt.strftime('%d.%m.%Y')
+                                
+                                ev_son5['Sonuç'] = ev_son5.apply(lambda x: 
+                                    '🟢 Kazandı' if (x['Ev Sahibi'] == ev_sahibi and int(x['Skor'].split('-')[0]) > int(x['Skor'].split('-')[1])) or
+                                                   (x['Deplasman'] == ev_sahibi and int(x['Skor'].split('-')[1]) > int(x['Skor'].split('-')[0])) else
+                                    '🔴 Kaybetti' if (x['Ev Sahibi'] == ev_sahibi and int(x['Skor'].split('-')[0]) < int(x['Skor'].split('-')[1])) or
+                                                    (x['Deplasman'] == ev_sahibi and int(x['Skor'].split('-')[1]) < int(x['Skor'].split('-')[0])) else
+                                    '⚪ Berabere', axis=1)
+                                
+                                st.dataframe(ev_son5[['Tarih', 'Ev Sahibi', 'Skor', 'Deplasman', 'Sonuç']])
+                                
+                                # Deplasman takımının son 5 maçı
+                                st.write(f"**{deplasman} Son 5 Maçı**")
+                                dep_son5 = df[
+                                    ((df['Ev Sahibi'] == deplasman) | (df['Deplasman'] == deplasman)) &
+                                    (df['Tarih'] < result_df.iloc[0]['Tarih'])
+                                ]
+                                dep_son5['Tarih'] = pd.to_datetime(dep_son5['Tarih'], format='%d.%m.%Y')
+                                dep_son5 = dep_son5.sort_values('Tarih', ascending=False).head(5)
+                                dep_son5['Tarih'] = dep_son5['Tarih'].dt.strftime('%d.%m.%Y')
+                                
+                                dep_son5['Sonuç'] = dep_son5.apply(lambda x: 
+                                    '🟢 Kazandı' if (x['Ev Sahibi'] == deplasman and int(x['Skor'].split('-')[0]) > int(x['Skor'].split('-')[1])) or
+                                                   (x['Deplasman'] == deplasman and int(x['Skor'].split('-')[1]) > int(x['Skor'].split('-')[0])) else
+                                    '🔴 Kaybetti' if (x['Ev Sahibi'] == deplasman and int(x['Skor'].split('-')[0]) < int(x['Skor'].split('-')[1])) or
+                                                    (x['Deplasman'] == deplasman and int(x['Skor'].split('-')[1]) < int(x['Skor'].split('-')[0])) else
+                                    '⚪ Berabere', axis=1)
+                                
+                                st.dataframe(dep_son5[['Tarih', 'Ev Sahibi', 'Skor', 'Deplasman', 'Sonuç']])
+
+                                # Ev sahibinin iç saha son 5 maçı
+                                st.write(f"**{ev_sahibi} Son 5 İç Saha Maçı**")
+                                ev_ic_saha = df[
+                                    (df['Ev Sahibi'] == ev_sahibi) &
+                                    (df['Tarih'] < result_df.iloc[0]['Tarih'])
+                                ]
+                                ev_ic_saha['Tarih'] = pd.to_datetime(ev_ic_saha['Tarih'], format='%d.%m.%Y')
+                                ev_ic_saha = ev_ic_saha.sort_values('Tarih', ascending=False).head(5)
+                                ev_ic_saha['Tarih'] = ev_ic_saha['Tarih'].dt.strftime('%d.%m.%Y')
+                                
+                                ev_ic_saha['Sonuç'] = ev_ic_saha.apply(lambda x: 
+                                    '🟢 Kazandı' if int(x['Skor'].split('-')[0]) > int(x['Skor'].split('-')[1]) else
+                                    '🔴 Kaybetti' if int(x['Skor'].split('-')[0]) < int(x['Skor'].split('-')[1]) else
+                                    '⚪ Berabere', axis=1)
+                                
+                                st.dataframe(ev_ic_saha[['Tarih', 'Ev Sahibi', 'Skor', 'Deplasman', 'Sonuç']])
+
+                                # Deplasman takımının deplasman son 5 maçı
+                                st.write(f"**{deplasman} Son 5 Deplasman Maçı**")
+                                dep_deplasman = df[
+                                    (df['Deplasman'] == deplasman) &
+                                    (df['Tarih'] < result_df.iloc[0]['Tarih'])
+                                ]
+                                dep_deplasman['Tarih'] = pd.to_datetime(dep_deplasman['Tarih'], format='%d.%m.%Y')
+                                dep_deplasman = dep_deplasman.sort_values('Tarih', ascending=False).head(5)
+                                dep_deplasman['Tarih'] = dep_deplasman['Tarih'].dt.strftime('%d.%m.%Y')
+                                
+                                dep_deplasman['Sonuç'] = dep_deplasman.apply(lambda x: 
+                                    '🟢 Kazandı' if int(x['Skor'].split('-')[1]) > int(x['Skor'].split('-')[0]) else
+                                    '🔴 Kaybetti' if int(x['Skor'].split('-')[1]) < int(x['Skor'].split('-')[0]) else
+                                    '⚪ Berabere', axis=1)
+                                
+                                st.dataframe(dep_deplasman[['Tarih', 'Ev Sahibi', 'Skor', 'Deplasman', 'Sonuç']])
 
 if __name__ == "__main__":
     main()
