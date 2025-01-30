@@ -80,30 +80,22 @@ def calculate_similarity(df, numeric_columns):
     
     weight_array = np.array([weights.get(i, 1.0) for i in range(len(numeric_columns))])
     
-    # Her maç çifti için benzerlik hesapla
-    for i in range(n_matches):
-        for j in range(n_matches):
-            if i != j:
-                # Seçilen sütunlardaki oranların farkını hesapla
-                diff = np.abs(normalized_data[i] - normalized_data[j])
-                
-                # Ağırlıklı fark hesapla
-                weighted_diff = diff * weight_array
-                
-                # Her bir oran için maksimum kabul edilebilir fark
-                max_acceptable_diff = 0.25  # %20'den %25'e yükseltildi
-                
-                # Farkın kabul edilebilir sınırlar içinde olup olmadığını kontrol et
-                within_threshold = weighted_diff <= max_acceptable_diff
-                
-                # En az %60 oranında benzerlik varsa kabul et (%70'ten düşürüldü)
-                min_similar_features = int(len(numeric_columns) * 0.6)
-                if np.sum(within_threshold) >= min_similar_features:
-                    # Benzerlik skorunu hesapla
-                    similarity = 1 - (np.mean(weighted_diff) / max_acceptable_diff)
-                    similarity_matrix[i,j] = similarity
-                else:
-                    similarity_matrix[i,j] = 0
+    # Vektörizasyon ile performans iyileştirmesi
+    normalized_data_matrix = normalized_data[:, np.newaxis, :]
+    diff_matrix = np.abs(normalized_data_matrix - normalized_data)
+    weighted_diff_matrix = diff_matrix * weight_array
+    
+    within_threshold = weighted_diff_matrix <= 0.25  # %20'den %25'e yükseltildi
+    similar_features_count = np.sum(within_threshold, axis=2)
+    
+    min_similar_features = int(len(numeric_columns) * 0.6)
+    valid_similarities = similar_features_count >= min_similar_features
+    
+    similarity_matrix = np.where(
+        valid_similarities,
+        1 - (np.mean(weighted_diff_matrix, axis=2) / 0.25),
+        0
+    )
     
     return similarity_matrix
 
@@ -162,6 +154,71 @@ def find_similar_matches(df, similarity_matrix, selected_idx, n_matches=5,
     
     return result_df
 
+def analyze_team_performance(df, team_name, last_n_matches=5):
+    """
+    Takımın son n maçtaki performans analizini yapar
+    """
+    team_matches = df[
+        ((df['Ev Sahibi'] == team_name) | (df['Deplasman'] == team_name))
+    ].copy()
+    
+    team_matches['Tarih'] = pd.to_datetime(team_matches['Tarih'], format='%d.%m.%Y')
+    team_matches = team_matches.sort_values('Tarih', ascending=False).head(last_n_matches)
+    
+    metrics = {
+        'Galibiyet': 0,
+        'Beraberlik': 0,
+        'Mağlubiyet': 0,
+        'Atılan Gol': 0,
+        'Yenilen Gol': 0
+    }
+    
+    for _, match in team_matches.iterrows():
+        ev_gol, dep_gol = map(int, match['Skor'].split('-'))
+        
+        if match['Ev Sahibi'] == team_name:
+            metrics['Atılan Gol'] += ev_gol
+            metrics['Yenilen Gol'] += dep_gol
+            if ev_gol > dep_gol:
+                metrics['Galibiyet'] += 1
+            elif ev_gol < dep_gol:
+                metrics['Mağlubiyet'] += 1
+            else:
+                metrics['Beraberlik'] += 1
+        else:
+            metrics['Atılan Gol'] += dep_gol
+            metrics['Yenilen Gol'] += ev_gol
+            if dep_gol > ev_gol:
+                metrics['Galibiyet'] += 1
+            elif dep_gol < ev_gol:
+                metrics['Mağlubiyet'] += 1
+            else:
+                metrics['Beraberlik'] += 1
+    
+    return metrics
+
+def validate_data(df):
+    """
+    Veri setinin doğruluğunu ve güvenliğini kontrol eder
+    """
+    required_columns = ['Tarih', 'Saat', 'Ev Sahibi', 'Deplasman', 'Skor', 'İY']
+    
+    # Gerekli sütunların varlığını kontrol et
+    if not all(col in df.columns for col in required_columns):
+        raise ValueError("Eksik sütunlar bulundu")
+    
+    # Tarih formatı kontrolü
+    try:
+        pd.to_datetime(df['Tarih'], format='%d.%m.%Y')
+    except:
+        raise ValueError("Geçersiz tarih formatı")
+    
+    # Skor formatı kontrolü
+    if not df['Skor'].str.match(r'^\d+-\d+$').all():
+        raise ValueError("Geçersiz skor formatı")
+    
+    return True
+
 def main():
     st.title("Benzer Maç Bulucu")
     
@@ -202,16 +259,20 @@ def main():
             week_matches = []
             for idx, row in latest_week_matches.iterrows():
                 match_str = f"{row['Ev Sahibi']} vs {row['Deplasman']} ({row['Tarih']} - {row['Saat']})"
-                week_matches.append((df.index.get_loc(idx), match_str))
+                week_matches.append((df.index.get_loc(idx), match_str))  # Tuple olarak bırakıyoruz
 
             selected_week_match = st.selectbox(
                 "Haftanın maçlarından birini seçin:",
                 options=week_matches,
-                format_func=lambda x: x[1]
+                format_func=lambda x: x[1]  # İkinci elemanı (match_str) göster
             )
 
             # Seçilen maç metnini kopyalanabilir şekilde göster
-            st.code(selected_week_match[1], language=None)
+            if selected_week_match:
+                st.code(selected_week_match[1], language=None)  # Tuple'ın ikinci elemanını kullan
+
+            # Daha sonraki işlemler için seçilen maçın index'ini kullan
+            selected_idx = selected_week_match[0]  # Tuple'ın ilk elemanını kullan
 
             # Filtreleme seçenekleri
             st.write("### 🔍 Filtreleme Seçenekleri")
@@ -260,7 +321,7 @@ def main():
                 df = load_and_prepare_data(csv_path, selected_criteria)
                 
                 if df is not None:
-                    selected_idx = selected_week_match[0]
+                    selected_idx = selected_idx
                     similarity_matrix = calculate_similarity(df, selected_criteria)
                     
                     result_df = find_similar_matches(
@@ -702,74 +763,103 @@ def main():
                                 # Ev sahibinin son 5 maçı
                                 st.write(f"**{ev_sahibi} Son 5 Maçı**")
                                 ev_son5 = df[
-                                    ((df['Ev Sahibi'] == ev_sahibi) | (df['Deplasman'] == ev_sahibi)) &
-                                    (df['Tarih'] < result_df.iloc[0]['Tarih'])
-                                ]
+                                    ((df['Ev Sahibi'] == ev_sahibi) | (df['Deplasman'] == ev_sahibi))
+                                ].copy()
+                                
+                                # Tarih karşılaştırması için tarihleri datetime formatına çevir
                                 ev_son5['Tarih'] = pd.to_datetime(ev_son5['Tarih'], format='%d.%m.%Y')
+                                secilen_tarih = pd.to_datetime(result_df.iloc[0]['Tarih'], format='%d.%m.%Y')
+                                
+                                # Seçilen maçtan önceki maçları filtrele
+                                ev_son5 = ev_son5[ev_son5['Tarih'] < secilen_tarih]
                                 ev_son5 = ev_son5.sort_values('Tarih', ascending=False).head(5)
+                                
+                                # Tarihi tekrar string formatına çevir
                                 ev_son5['Tarih'] = ev_son5['Tarih'].dt.strftime('%d.%m.%Y')
                                 
-                                ev_son5['Sonuç'] = ev_son5.apply(lambda x: 
-                                    '🟢 Kazandı' if (x['Ev Sahibi'] == ev_sahibi and int(x['Skor'].split('-')[0]) > int(x['Skor'].split('-')[1])) or
-                                                   (x['Deplasman'] == ev_sahibi and int(x['Skor'].split('-')[1]) > int(x['Skor'].split('-')[0])) else
-                                    '🔴 Kaybetti' if (x['Ev Sahibi'] == ev_sahibi and int(x['Skor'].split('-')[0]) < int(x['Skor'].split('-')[1])) or
-                                                    (x['Deplasman'] == ev_sahibi and int(x['Skor'].split('-')[1]) < int(x['Skor'].split('-')[0])) else
-                                    '⚪ Berabere', axis=1)
+                                # Sonuç hesaplama
+                                def get_team_result(row, team):
+                                    if row['Skor'] == '-':
+                                        return '⚪ Oynanmadı'
+                                    ev_gol, dep_gol = map(int, row['Skor'].split('-'))
+                                    if row['Ev Sahibi'] == team:
+                                        if ev_gol > dep_gol: return '🟢 Kazandı'
+                                        elif ev_gol < dep_gol: return '🔴 Kaybetti'
+                                    else:  # Deplasman takımı
+                                        if dep_gol > ev_gol: return '🟢 Kazandı'
+                                        elif dep_gol < ev_gol: return '🔴 Kaybetti'
+                                    return '⚪ Berabere'
                                 
-                                st.dataframe(ev_son5[['Tarih', 'Ev Sahibi', 'Skor', 'Deplasman', 'Sonuç']])
+                                ev_son5['Sonuç'] = ev_son5.apply(lambda x: get_team_result(x, ev_sahibi), axis=1)
                                 
+                                if not ev_son5.empty:
+                                    st.dataframe(ev_son5[['Tarih', 'Ev Sahibi', 'Skor', 'Deplasman', 'Sonuç']])
+                                else:
+                                    st.info(f"{ev_sahibi} için geçmiş maç verisi bulunamadı.")
+
                                 # Deplasman takımının son 5 maçı
                                 st.write(f"**{deplasman} Son 5 Maçı**")
                                 dep_son5 = df[
-                                    ((df['Ev Sahibi'] == deplasman) | (df['Deplasman'] == deplasman)) &
-                                    (df['Tarih'] < result_df.iloc[0]['Tarih'])
-                                ]
+                                    ((df['Ev Sahibi'] == deplasman) | (df['Deplasman'] == deplasman))
+                                ].copy()
+                                
                                 dep_son5['Tarih'] = pd.to_datetime(dep_son5['Tarih'], format='%d.%m.%Y')
+                                dep_son5 = dep_son5[dep_son5['Tarih'] < secilen_tarih]
                                 dep_son5 = dep_son5.sort_values('Tarih', ascending=False).head(5)
                                 dep_son5['Tarih'] = dep_son5['Tarih'].dt.strftime('%d.%m.%Y')
                                 
-                                dep_son5['Sonuç'] = dep_son5.apply(lambda x: 
-                                    '🟢 Kazandı' if (x['Ev Sahibi'] == deplasman and int(x['Skor'].split('-')[0]) > int(x['Skor'].split('-')[1])) or
-                                                   (x['Deplasman'] == deplasman and int(x['Skor'].split('-')[1]) > int(x['Skor'].split('-')[0])) else
-                                    '🔴 Kaybetti' if (x['Ev Sahibi'] == deplasman and int(x['Skor'].split('-')[0]) < int(x['Skor'].split('-')[1])) or
-                                                    (x['Deplasman'] == deplasman and int(x['Skor'].split('-')[1]) < int(x['Skor'].split('-')[0])) else
-                                    '⚪ Berabere', axis=1)
+                                dep_son5['Sonuç'] = dep_son5.apply(lambda x: get_team_result(x, deplasman), axis=1)
                                 
-                                st.dataframe(dep_son5[['Tarih', 'Ev Sahibi', 'Skor', 'Deplasman', 'Sonuç']])
+                                if not dep_son5.empty:
+                                    st.dataframe(dep_son5[['Tarih', 'Ev Sahibi', 'Skor', 'Deplasman', 'Sonuç']])
+                                else:
+                                    st.info(f"{deplasman} için geçmiş maç verisi bulunamadı.")
 
                                 # Ev sahibinin iç saha son 5 maçı
                                 st.write(f"**{ev_sahibi} Son 5 İç Saha Maçı**")
-                                ev_ic_saha = df[
-                                    (df['Ev Sahibi'] == ev_sahibi) &
-                                    (df['Tarih'] < result_df.iloc[0]['Tarih'])
-                                ]
+                                ev_ic_saha = df[df['Ev Sahibi'] == ev_sahibi].copy()
+                                
                                 ev_ic_saha['Tarih'] = pd.to_datetime(ev_ic_saha['Tarih'], format='%d.%m.%Y')
+                                ev_ic_saha = ev_ic_saha[ev_ic_saha['Tarih'] < secilen_tarih]
                                 ev_ic_saha = ev_ic_saha.sort_values('Tarih', ascending=False).head(5)
                                 ev_ic_saha['Tarih'] = ev_ic_saha['Tarih'].dt.strftime('%d.%m.%Y')
                                 
-                                ev_ic_saha['Sonuç'] = ev_ic_saha.apply(lambda x: 
-                                    '🟢 Kazandı' if int(x['Skor'].split('-')[0]) > int(x['Skor'].split('-')[1]) else
-                                    '🔴 Kaybetti' if int(x['Skor'].split('-')[0]) < int(x['Skor'].split('-')[1]) else
-                                    '⚪ Berabere', axis=1)
+                                def get_home_result(skor):
+                                    if skor == '-': return '⚪ Oynanmadı'
+                                    ev_gol, dep_gol = map(int, skor.split('-'))
+                                    if ev_gol > dep_gol: return '🟢 Kazandı'
+                                    elif ev_gol < dep_gol: return '🔴 Kaybetti'
+                                    return '⚪ Berabere'
                                 
-                                st.dataframe(ev_ic_saha[['Tarih', 'Ev Sahibi', 'Skor', 'Deplasman', 'Sonuç']])
+                                ev_ic_saha['Sonuç'] = ev_ic_saha['Skor'].apply(get_home_result)
+                                
+                                if not ev_ic_saha.empty:
+                                    st.dataframe(ev_ic_saha[['Tarih', 'Ev Sahibi', 'Skor', 'Deplasman', 'Sonuç']])
+                                else:
+                                    st.info(f"{ev_sahibi} için iç saha maç verisi bulunamadı.")
 
                                 # Deplasman takımının deplasman son 5 maçı
                                 st.write(f"**{deplasman} Son 5 Deplasman Maçı**")
-                                dep_deplasman = df[
-                                    (df['Deplasman'] == deplasman) &
-                                    (df['Tarih'] < result_df.iloc[0]['Tarih'])
-                                ]
+                                dep_deplasman = df[df['Deplasman'] == deplasman].copy()
+                                
                                 dep_deplasman['Tarih'] = pd.to_datetime(dep_deplasman['Tarih'], format='%d.%m.%Y')
+                                dep_deplasman = dep_deplasman[dep_deplasman['Tarih'] < secilen_tarih]
                                 dep_deplasman = dep_deplasman.sort_values('Tarih', ascending=False).head(5)
                                 dep_deplasman['Tarih'] = dep_deplasman['Tarih'].dt.strftime('%d.%m.%Y')
                                 
-                                dep_deplasman['Sonuç'] = dep_deplasman.apply(lambda x: 
-                                    '🟢 Kazandı' if int(x['Skor'].split('-')[1]) > int(x['Skor'].split('-')[0]) else
-                                    '🔴 Kaybetti' if int(x['Skor'].split('-')[1]) < int(x['Skor'].split('-')[0]) else
-                                    '⚪ Berabere', axis=1)
+                                def get_away_result(skor):
+                                    if skor == '-': return '⚪ Oynanmadı'
+                                    ev_gol, dep_gol = map(int, skor.split('-'))
+                                    if dep_gol > ev_gol: return '🟢 Kazandı'
+                                    elif dep_gol < ev_gol: return '🔴 Kaybetti'
+                                    return '⚪ Berabere'
                                 
-                                st.dataframe(dep_deplasman[['Tarih', 'Ev Sahibi', 'Skor', 'Deplasman', 'Sonuç']])
+                                dep_deplasman['Sonuç'] = dep_deplasman['Skor'].apply(get_away_result)
+                                
+                                if not dep_deplasman.empty:
+                                    st.dataframe(dep_deplasman[['Tarih', 'Ev Sahibi', 'Skor', 'Deplasman', 'Sonuç']])
+                                else:
+                                    st.info(f"{deplasman} için deplasman maç verisi bulunamadı.")
 
 if __name__ == "__main__":
     main()
